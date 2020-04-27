@@ -7,7 +7,8 @@ from django.forms import inlineformset_factory
 from .forms import OrderForm, CreateUserForm
 from .filters import OrderFilter
 from django.contrib.auth.forms import UserCreationForm
-
+from .decorators import unauthenticated_user, allowed_users, admin_only
+from django.contrib.auth.models import Group
 from django.contrib.auth import authenticate, login, logout
 
 # hampir sama seperti middleware ========>>> lanjutannya adalah @login_required(login_url='login') ======>> login terlebih dahulu
@@ -18,47 +19,58 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 
 
+@unauthenticated_user
 def registerPage(request):
     # form = UserCreationForm()
     # ===============================================
-    if request.user.is_authenticated:
-        return redirect('home')
+    # if request.user.is_authenticated:
+    #     return redirect('home')
     # ===============================================
-    else:
-        form = CreateUserForm()
-        if request.method == "POST":
-            form = CreateUserForm(request.POST)
-            if form.is_valid():
-                form.save()
-                user = form.cleaned_data.get('username')
-                # FLASSH MESSAGES
-                messages.success(request, 'Account was created for ' + user)
-                return redirect('login')
+    # else:
+    form = CreateUserForm()
+    if request.method == "POST":
+        form = CreateUserForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            username = form.cleaned_data.get('username')
+
+            group = Group.objects.get(name='customer')
+            user.groups.add(group)
+
+            Customer.objects.create(
+                user=user,
+            )
+
+            # FLASSH MESSAGES
+            messages.success(request, 'Account was created for ' + username)
+            return redirect('login')
 
     context = {'form': form}
     return render(request, 'accounts/register.html', context)
 
 
+# ===== FUNCTION DI DECORATORS.PY ==========
+@unauthenticated_user
 def loginPage(request):
     # jika sudah login maka tidak bisa masuk ke logi lagi
     # ===============================================
-    if request.user.is_authenticated:
-        return redirect('home')
+    # if request.user.is_authenticated:
+    #     return redirect('home')
     # ===============================================
-    else:
-        if request.method == "POST":
-            username = request.POST.get('username')
-            password = request.POST.get('password')
+    # else:
+    if request.method == "POST":
+        username = request.POST.get('username')
+        password = request.POST.get('password')
 
-            user = authenticate(request, username=username, password=password)
-            if user is not None:
-                login(request, user)
-                return redirect('home')
-            else:
-                messages.info(request, 'Username or Password is incorrect')
+        user = authenticate(request, username=username, password=password)
+        if user is not None:
+            login(request, user)
+            return redirect('home')
+        else:
+            messages.info(request, 'Username or Password is incorrect')
 
-        context = {}
-        return render(request, 'accounts/login.html', context)
+    context = {}
+    return render(request, 'accounts/login.html', context)
 
 
 def logoutUser(request):
@@ -67,6 +79,10 @@ def logoutUser(request):
 
 
 @login_required(login_url='login')
+# =======decorators.py=================
+# @allowed_users(allowed_roles=['admin'])
+@admin_only
+# =======decorators.py=================
 def home(request):
     customers = Customer.objects.all()
     orders = Order.objects.all()
@@ -76,6 +92,22 @@ def home(request):
     context = {'customers': customers,
                'orders': orders, 'total_order': total_order, 'delivered': delivered, 'pending': pending}
     return render(request, 'accounts/dashboard.html', context)
+
+
+@login_required(login_url='login')
+@allowed_users(allowed_roles=['customer'])
+def userPage(request):
+
+    # =========relation order dengan customer===============
+    orders = request.user.customer.order_set.all()
+
+    total_order = orders.count()
+    delivered = orders.filter(status='Delivered').count()
+    pending = orders.filter(status='Pending').count()
+    print('ORDERS:', orders)
+    context = {'orders': orders, 'total_order': total_order,
+               'delivered': delivered, 'pending': pending}
+    return render(request, 'accounts/user.html', context)
 
 
 @login_required(login_url='login')
